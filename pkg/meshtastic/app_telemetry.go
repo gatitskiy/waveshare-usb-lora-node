@@ -142,6 +142,7 @@ func (app *TelemetryApplication) publishDeviceMetrics() {
 	uptimeSeconds := uint32(time.Since(app.startTime).Seconds())
 
 	telemetry := pb.Telemetry{
+		Time: uint32(time.Now().Unix()),
 		Variant: &pb.Telemetry_DeviceMetrics{
 			DeviceMetrics: &pb.DeviceMetrics{
 				BatteryLevel:       &batteryLevel,
