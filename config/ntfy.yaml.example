@@ -5,15 +5,13 @@ nats_subject_prefix: "mesh.my_node"
 # docker-compose.yml, or "https://ntfy.sh" for the public instance.
 ntfy_url: "http://ntfy:80"
 
-# Topic where incoming mesh messages are published as ntfy notifications.
-ntfy_recv_subject: "my-mesh-inbox-CHANGE-ME"
-
-# Topic the bridge listens on for outgoing messages. Anything posted to this
-# topic that wasn't sent by ws-ntfy itself is forwarded to the mesh (as a
-# broadcast on the same channel as the most recent incoming message). It can
-# be the same topic as ntfy_recv_subject — own posts are filtered by tag.
-ntfy_send_subject: "my-mesh-inbox-CHANGE-ME"
-
-# Fallback channel used for replies before any incoming text has been seen.
-# Once a message arrives, the bridge replies on that message's channel.
-ntfy_default_send_channel: 1
+# Map each Meshtastic channel you care about to its own ntfy topic.
+# Incoming texts on a channel are posted to that channel's topic.
+# Replies typed into a topic broadcast on the matching channel — so each
+# topic in the ntfy app acts as a chat thread for one channel and there
+# is no risk of replies leaking to a different channel.
+channels:
+  - id: 0
+    topic: "my-mesh-longfast-CHANGE-ME"
+  - id: 1
+    topic: "my-mesh-private-CHANGE-ME"

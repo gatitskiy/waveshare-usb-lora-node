@@ -11,7 +11,6 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -34,13 +33,16 @@ func showUsageAndExit(exitCode int) {
 	os.Exit(exitCode)
 }
 
+type ChannelMapping struct {
+	Id    uint32 `yaml:"id"`
+	Topic string `yaml:"topic"`
+}
+
 type Configuration struct {
-	NatsUrl                string `yaml:"nats_url"`
-	NatsSubjectPrefix      string `yaml:"nats_subject_prefix"`
-	NtfyUrl                string `yaml:"ntfy_url"`
-	NtfyRecvSubject        string `yaml:"ntfy_recv_subject"`
-	NtfySendSubject        string `yaml:"ntfy_send_subject"`
-	NtfyDefaultSendChannel uint32 `yaml:"ntfy_default_send_channel"`
+	NatsUrl           string           `yaml:"nats_url"`
+	NatsSubjectPrefix string           `yaml:"nats_subject_prefix"`
+	NtfyUrl           string           `yaml:"ntfy_url"`
+	Channels          []ChannelMapping `yaml:"channels"`
 }
 
 func loadConfiguration(configFile string) (*Configuration, error) {
@@ -88,31 +90,6 @@ func (d *nodeDirectory) titleFor(id types.NodeId) string {
 	return fmt.Sprintf("Message from node %s", id)
 }
 
-// replyState tracks the channel of the most recently received text message so
-// outgoing replies from ntfy land in the same channel (DMs aren't supported —
-// we always broadcast).
-type replyState struct {
-	lastChannel       atomic.Uint32
-	hasSeenIncoming   atomic.Bool
-	defaultChannel    uint32
-}
-
-func newReplyState(defaultChannel uint32) *replyState {
-	return &replyState{defaultChannel: defaultChannel}
-}
-
-func (s *replyState) record(channel uint32) {
-	s.lastChannel.Store(channel)
-	s.hasSeenIncoming.Store(true)
-}
-
-func (s *replyState) channelForReply() (uint32, bool) {
-	if s.hasSeenIncoming.Load() {
-		return s.lastChannel.Load(), true
-	}
-	return s.defaultChannel, false
-}
-
 type ntfyEvent struct {
 	Event   string   `json:"event"`
 	Topic   string   `json:"topic"`
@@ -129,17 +106,16 @@ func (e *ntfyEvent) hasTag(tag string) bool {
 	return false
 }
 
-func runReplyBridge(config *Configuration, nc *nats.Conn, state *replyState) {
-	url := fmt.Sprintf("%s/%s/json", config.NtfyUrl, config.NtfySendSubject)
-	outSubject := config.NatsSubjectPrefix + ".out.text"
+func runReplyBridge(ntfyUrl, topic string, channelId uint32, outSubject string, nc *nats.Conn) {
+	url := fmt.Sprintf("%s/%s/json", ntfyUrl, topic)
 	backoff := time.Second
 
 	for {
-		err := streamReplies(url, outSubject, config, nc, state)
+		err := streamReplies(url, topic, channelId, outSubject, nc)
 		if err != nil {
-			log.With("err", err).Warn("ntfy reply stream broke, reconnecting")
+			log.With("err", err, "topic", topic).Warn("ntfy reply stream broke, reconnecting")
 		} else {
-			log.Warn("ntfy reply stream closed cleanly, reconnecting")
+			log.With("topic", topic).Warn("ntfy reply stream closed cleanly, reconnecting")
 		}
 		time.Sleep(backoff)
 		if backoff < 30*time.Second {
@@ -148,12 +124,12 @@ func runReplyBridge(config *Configuration, nc *nats.Conn, state *replyState) {
 	}
 }
 
-func streamReplies(url, outSubject string, config *Configuration, nc *nats.Conn, state *replyState) error {
+func streamReplies(url, topic string, channelId uint32, outSubject string, nc *nats.Conn) error {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return err
 	}
-	client := &http.Client{} // no timeout: keep connection open
+	client := &http.Client{} // no timeout: keep the long-poll open
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -163,7 +139,7 @@ func streamReplies(url, outSubject string, config *Configuration, nc *nats.Conn,
 		return fmt.Errorf("ntfy returned %s", resp.Status)
 	}
 
-	log.With("topic", config.NtfySendSubject).Info("Listening on ntfy for replies")
+	log.With("topic", topic, "channel", channelId).Info("Listening on ntfy for replies")
 
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -188,13 +164,8 @@ func streamReplies(url, outSubject string, config *Configuration, nc *nats.Conn,
 			continue
 		}
 
-		channel, seen := state.channelForReply()
-		if !seen {
-			log.With("channel", channel).Warn("No incoming text seen yet; using default channel for reply")
-		}
-
 		out := map[string]interface{}{
-			"channel": channel,
+			"channel": channelId,
 			"to":      "ffffffff",
 			"text":    ev.Message,
 		}
@@ -207,9 +178,28 @@ func streamReplies(url, outSubject string, config *Configuration, nc *nats.Conn,
 			log.With("err", err).Error("Failed to publish reply to NATS")
 			continue
 		}
-		log.With("text", ev.Message, "channel", channel).Info("Forwarded ntfy reply to mesh")
+		log.With("text", ev.Message, "channel", channelId, "topic", topic).Info("Forwarded ntfy reply to mesh")
 	}
 	return scanner.Err()
+}
+
+func postIncoming(ntfyUrl, topic, title, text string) error {
+	req, err := http.NewRequest("POST", ntfyUrl+"/"+topic, bytes.NewBufferString(text))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "text/plain")
+	req.Header.Set("Title", title)
+	req.Header.Set("Tags", wsNtfyTag)
+	resp, err := (&http.Client{}).Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("ntfy returned %s", resp.Status)
+	}
+	return nil
 }
 
 func main() {
@@ -249,6 +239,21 @@ func main() {
 	}
 	config.NtfyUrl = strings.TrimRight(config.NtfyUrl, "/")
 
+	if len(config.Channels) == 0 {
+		log.Fatal("No channels configured (set 'channels:' in ntfy.yaml)")
+	}
+
+	topicByChannel := map[uint32]string{}
+	for _, ch := range config.Channels {
+		if ch.Topic == "" {
+			log.With("channel", ch.Id).Fatal("Channel mapping has empty topic")
+		}
+		if existing, ok := topicByChannel[ch.Id]; ok {
+			log.With("channel", ch.Id, "topics", []string{existing, ch.Topic}).Fatal("Duplicate channel id in channels mapping")
+		}
+		topicByChannel[ch.Id] = ch.Topic
+	}
+
 	nc, err := nats.Connect(config.NatsUrl)
 	if err != nil {
 		log.With("err", err).Fatal("Failed to connect to NATS server")
@@ -257,7 +262,7 @@ func main() {
 	defer nc.Close()
 
 	directory := newNodeDirectory()
-	replies := newReplyState(config.NtfyDefaultSendChannel)
+	outSubject := config.NatsSubjectPrefix + ".out.text"
 
 	nodeInfoSub, err := nc.Subscribe(config.NatsSubjectPrefix+".in.node_info", func(msg *nats.Msg) {
 		var info meshtastic.NodeInfoApplicationIncomingMessage
@@ -284,37 +289,27 @@ func main() {
 			return
 		}
 
-		replies.record(message.ChannelId)
-		title := directory.titleFor(message.From)
-		log.With("from", message.From, "channel", message.ChannelId, "title", title, "text", message.Text).Info("Forwarding message")
+		topic, ok := topicByChannel[message.ChannelId]
+		if !ok {
+			log.With("from", message.From, "channel", message.ChannelId).
+				Debug("No ntfy topic mapped for this channel; dropping")
+			return
+		}
 
-		req, err := http.NewRequest("POST", config.NtfyUrl+"/"+config.NtfyRecvSubject, bytes.NewBufferString(message.Text))
-		if err != nil {
-			log.With("err", err).Error("Failed to create request to ntfy")
-			return
-		}
-		req.Header.Set("Content-Type", "text/plain")
-		req.Header.Set("Title", title)
-		req.Header.Set("Tags", wsNtfyTag)
-		client := &http.Client{}
-		resp, err := client.Do(req)
-		if err != nil {
-			log.With("err", err).Error("Failed to forward message to ntfy")
-			return
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode >= 400 {
-			log.With("status", resp.Status, "url", req.URL.String()).Error("ntfy rejected the message")
+		title := directory.titleFor(message.From)
+		log.With("from", message.From, "channel", message.ChannelId, "topic", topic, "text", message.Text).
+			Info("Forwarding message")
+
+		if err := postIncoming(config.NtfyUrl, topic, title, message.Text); err != nil {
+			log.With("err", err, "topic", topic).Error("Failed to forward message to ntfy")
 		}
 	})
 	if err != nil {
 		log.With("err", err).Fatal("Failed to subscribe to text")
 	}
 
-	if config.NtfySendSubject != "" {
-		go runReplyBridge(config, nc, replies)
-	} else {
-		log.Warn("ntfy_send_subject not set; ntfy → mesh bridge disabled")
+	for _, ch := range config.Channels {
+		go runReplyBridge(config.NtfyUrl, ch.Topic, ch.Id, outSubject, nc)
 	}
 
 	c := make(chan os.Signal, 2)
