@@ -141,11 +141,26 @@ func (c *MeshtasticClient) Close() error {
 func (c *MeshtasticClient) initRadio(radioConfig *RadioConfiguration) error {
 	c.continuousRssi = radioConfig.ContinuousRssi
 
-	// Switch back to RX once the message has been transmitted
-	if _, err := c.apiClient.SendRequest(&client.RxTxFallbackMode{
-		FallbackMode: client.FALLBACK_STANDBY_XOSC_RX,
-	}, time.Second); err != nil {
-		return fmt.Errorf("failed to set radio standby mode: %v", err.Error())
+	// Switch back to RX once the message has been transmitted.
+	//
+	// On some hosts, opening the serial port pulses DTR and resets the MCU
+	// into the bootloader for a short window before it jumps to firmware.
+	// Retry the first request so we don't bail before the firmware is ready
+	// to talk to us.
+	var lastErr error
+	for attempt := 0; attempt < 30; attempt++ {
+		_, err := c.apiClient.SendRequest(&client.RxTxFallbackMode{
+			FallbackMode: client.FALLBACK_STANDBY_XOSC_RX,
+		}, time.Second)
+		if err == nil {
+			lastErr = nil
+			break
+		}
+		lastErr = err
+		time.Sleep(500 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("failed to set radio standby mode after retries: %v", lastErr.Error())
 	}
 
 	// Frequency
