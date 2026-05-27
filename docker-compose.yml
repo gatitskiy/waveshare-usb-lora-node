@@ -17,7 +17,6 @@ services:
       - TZ=UTC
       - NTFY_BEHIND_PROXY=false
       - NTFY_CACHE_FILE=/var/cache/ntfy/cache.db
-      - NTFY_ATTACHMENT_CACHE_DIR=/var/cache/ntfy/attachments
     volumes:
       - ./ntfy-data:/var/cache/ntfy
     ports:
