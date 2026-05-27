@@ -1,0 +1,47 @@
+id: "00000000"              # 32-bit hex node id
+short_name: "Nd"            # 2-4 chars
+long_name: "My Node"
+mac_address: "00:00:00:00:00:00"   # last 4 bytes typically match node id
+hw_model: 255
+
+public_key: "REPLACE_WITH_32_BYTE_BASE64_KEY="   # openssl rand -base64 32
+
+nats_url: "nats://nats:4222"        # use "nats://localhost:4222" if running outside Docker
+nats_subject_prefix: "mesh.my_node"
+
+radio:
+  frequency: 869525000      # EU LongFast. US: 906875000, CN: 470000000
+  power: 17                 # 14, 17, 20, 22 (dBm)
+  spreading_factor: 11
+  bandwidth: 250
+  coding_rate: "4/5"
+  continuous_rssi: false
+
+retransmit:
+  forward: true
+  period: ["3s", "7s"]
+  jitter: "1s"
+
+channels:
+  - id: 0
+    name: "LongFast"
+    encryption_key: "AQ=="
+  - id: 1
+    name: "Private"
+    encryption_key: "REPLACE_WITH_32_BYTE_BASE64_KEY="   # openssl rand -base64 32
+
+node_info:
+  channel: 0
+  publish_period: "3h"
+
+telemetry:
+  device_metrics:
+    channel: 0
+    publish_period: "30m"
+
+position:
+  latitude: 0.0
+  longitude: 0.0
+  altitude: 0
+  channel: 0
+  publish_period: "1h"

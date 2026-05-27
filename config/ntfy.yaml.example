@@ -1,0 +1,4 @@
+nats_url: "nats://nats:4222"
+nats_subject_prefix: "mesh.my_node"
+ntfy_recv_subject: "my-mesh-inbox-CHANGE-ME"   # https://ntfy.sh/<this>
+ntfy_send_subject: "my-mesh-inbox-CHANGE-ME"
