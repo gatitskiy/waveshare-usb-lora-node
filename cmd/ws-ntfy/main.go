@@ -43,6 +43,7 @@ type Configuration struct {
 	NatsSubjectPrefix string           `yaml:"nats_subject_prefix"`
 	NtfyUrl           string           `yaml:"ntfy_url"`
 	Channels          []ChannelMapping `yaml:"channels"`
+	DirectoryPath     string           `yaml:"directory_path"`
 }
 
 func loadConfiguration(configFile string) (*Configuration, error) {
@@ -63,12 +64,69 @@ func loadConfiguration(configFile string) (*Configuration, error) {
 }
 
 type nodeDirectory struct {
-	mu    sync.RWMutex
-	names map[types.NodeId]string
+	mu       sync.RWMutex
+	names    map[types.NodeId]string
+	filePath string
 }
 
-func newNodeDirectory() *nodeDirectory {
-	return &nodeDirectory{names: map[types.NodeId]string{}}
+func newNodeDirectory(filePath string) *nodeDirectory {
+	d := &nodeDirectory{
+		names:    map[types.NodeId]string{},
+		filePath: filePath,
+	}
+	d.load()
+	return d
+}
+
+func (d *nodeDirectory) load() {
+	if d.filePath == "" {
+		return
+	}
+	data, err := os.ReadFile(d.filePath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.With("err", err, "path", d.filePath).Warn("Failed to load node directory")
+		}
+		return
+	}
+	raw := map[string]string{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		log.With("err", err, "path", d.filePath).Warn("Failed to parse node directory")
+		return
+	}
+	for k, v := range raw {
+		var n uint32
+		if _, err := fmt.Sscanf(k, "%x", &n); err != nil {
+			continue
+		}
+		d.names[types.NodeId(n)] = v
+	}
+	log.With("count", len(d.names), "path", d.filePath).Info("Loaded node directory")
+}
+
+func (d *nodeDirectory) save() {
+	if d.filePath == "" {
+		return
+	}
+	d.mu.RLock()
+	raw := make(map[string]string, len(d.names))
+	for k, v := range d.names {
+		raw[fmt.Sprintf("%08x", uint32(k))] = v
+	}
+	d.mu.RUnlock()
+	data, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		log.With("err", err).Warn("Failed to marshal node directory")
+		return
+	}
+	tmp := d.filePath + ".tmp"
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		log.With("err", err, "path", tmp).Warn("Failed to write node directory")
+		return
+	}
+	if err := os.Rename(tmp, d.filePath); err != nil {
+		log.With("err", err, "path", d.filePath).Warn("Failed to commit node directory")
+	}
 }
 
 func (d *nodeDirectory) set(id types.NodeId, name string) {
@@ -76,8 +134,13 @@ func (d *nodeDirectory) set(id types.NodeId, name string) {
 		return
 	}
 	d.mu.Lock()
+	if d.names[id] == name {
+		d.mu.Unlock()
+		return
+	}
 	d.names[id] = name
 	d.mu.Unlock()
+	d.save()
 }
 
 func (d *nodeDirectory) titleFor(id types.NodeId) string {
@@ -261,7 +324,7 @@ func main() {
 
 	defer nc.Close()
 
-	directory := newNodeDirectory()
+	directory := newNodeDirectory(config.DirectoryPath)
 	outSubject := config.NatsSubjectPrefix + ".out.text"
 
 	nodeInfoSub, err := nc.Subscribe(config.NatsSubjectPrefix+".in.node_info", func(msg *nats.Msg) {

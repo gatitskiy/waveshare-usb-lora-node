@@ -5,6 +5,11 @@ nats_subject_prefix: "mesh.my_node"
 # docker-compose.yml, or "https://ntfy.sh" for the public instance.
 ntfy_url: "http://ntfy:80"
 
+# Persisted cache of node id → name learned from NodeInfo broadcasts. NodeInfo
+# is broadcast on a long cycle (hours), so persisting avoids losing names
+# across restarts. docker-compose.yml mounts ./ws-ntfy-data into /data.
+directory_path: "/data/node_directory.json"
+
 # Map each Meshtastic channel you care about to its own ntfy topic.
 # Incoming texts on a channel are posted to that channel's topic.
 # Replies typed into a topic broadcast on the matching channel — so each

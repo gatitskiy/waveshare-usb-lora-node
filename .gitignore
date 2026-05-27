@@ -1,4 +1,5 @@
 /target
 /config/*.yaml
 /ntfy-data
+/ws-ntfy-data
 node.log

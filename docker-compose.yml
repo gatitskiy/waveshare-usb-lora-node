@@ -48,5 +48,6 @@ services:
       - ws-node
     volumes:
       - ./config:/config:ro
+      - ./ws-ntfy-data:/data
     command:
       ["ws-ntfy", "-c", "/config/ntfy.yaml", "-l", "${LOG_LEVEL:-info}"]
