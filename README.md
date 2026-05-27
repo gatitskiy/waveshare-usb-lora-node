@@ -4,6 +4,85 @@ This node is implemented on top of [Waveshare USB-to-LoRa with custom firmware](
 
 The node connects to a [NATS server](https://github.com/nats-io/nats-server) to receive and send application specific messages. All NATS messages are serialized to JSON.
 
+## Running with Docker
+
+`docker-compose.yml` brings up the full stack on a Linux host: NATS broker,
+`ws-node` with the USB-LoRa dongle passed in, and `ws-ntfy` forwarding
+incoming text messages to ntfy.sh. The bundled `Dockerfile` is a
+multi-stage build that installs `protoc`, generates the Meshtastic Go
+bindings, and compiles both binaries into an Alpine runtime image.
+
+> USB serial passthrough only works on Linux hosts. Docker Desktop on
+> macOS/Windows does not pass through USB-serial devices into containers.
+
+Prepare configuration:
+
+```bash
+cp config/node.yaml.example   config/node.yaml
+cp config/ntfy.yaml.example   config/ntfy.yaml
+# edit both files — at minimum set node id, names, public_key,
+# nats_subject_prefix, channel keys, ntfy topic
+```
+
+Keep `nats_url: "nats://nats:4222"` in both — that's the service name on
+the Compose network.
+
+Start everything (defaults to `/dev/ttyACM0`):
+
+```bash
+docker compose up -d --build
+```
+
+If the dongle is on a different port, or if you have several USB-serial
+devices, override the path. The `by-id` symlink is stable across reboots:
+
+```bash
+ls -l /dev/serial/by-id/
+WS_NODE_SERIAL=/dev/serial/by-id/usb-WCH.CN_USB_Single_Serial_XXXXXXXXXX-if00 \
+  docker compose up -d --build
+```
+
+Logs:
+
+```bash
+docker compose logs -f ws-node
+docker compose logs -f ws-ntfy
+```
+
+### Sending / receiving from the host
+
+The `nats` CLI is the easiest way, but you can also use the bundled
+`natsio/nats-box` image without installing anything:
+
+```bash
+# Subscribe to all events from the node
+docker run --rm --network=waveshare-usb-lora-node_default natsio/nats-box \
+  nats sub --server=nats://nats:4222 'mesh.<your_prefix>.>'
+
+# Publish a message (channel id and recipient as in your config)
+docker run --rm --network=waveshare-usb-lora-node_default natsio/nats-box \
+  nats pub --server=nats://nats:4222 mesh.<your_prefix>.out.text \
+  '{"channel":1,"to":"ffffffff","text":"hello"}'
+```
+
+### Diagnosing a silent device
+
+If `ws-node` exits with `failed to set radio standby mode: timeout`, the
+custom firmware on the Waveshare board is not responding. Two helper scripts
+are included:
+
+```bash
+# Listen passively, toggle DTR/RTS, then send GET_VERSION
+python3 probe.py /dev/ttyACM0
+
+# Confirm the bootloader is still listening (sends a valid chunk frame)
+python3 probe_boot.py /dev/ttyACM0
+```
+
+A healthy custom firmware replies to `probe.py` with a frame starting `aa 81 ...`
+(MSG_VERSION). After flashing via `wsprog`, unplug and replug **without** holding
+BOOT — otherwise the bootloader stays in flash mode and the firmware never starts.
+
 ## Generating protobufs
 
 Install Protocol Buffers compiler [as described here](https://protobuf.dev/installation/).
