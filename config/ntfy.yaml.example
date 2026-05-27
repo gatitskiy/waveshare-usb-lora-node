@@ -1,6 +1,19 @@
 nats_url: "nats://nats:4222"
 nats_subject_prefix: "mesh.my_node"
-ntfy_url: "http://ntfy:80"             # local ntfy service in docker-compose.
-                                       # use "https://ntfy.sh" for the public instance.
-ntfy_recv_subject: "my-mesh-inbox-CHANGE-ME"   # http://<host>:8089/<this>
+
+# ntfy server URL. Use "http://ntfy:80" for the local service started by
+# docker-compose.yml, or "https://ntfy.sh" for the public instance.
+ntfy_url: "http://ntfy:80"
+
+# Topic where incoming mesh messages are published as ntfy notifications.
+ntfy_recv_subject: "my-mesh-inbox-CHANGE-ME"
+
+# Topic the bridge listens on for outgoing messages. Anything posted to this
+# topic that wasn't sent by ws-ntfy itself is forwarded to the mesh (as a
+# broadcast on the same channel as the most recent incoming message). It can
+# be the same topic as ntfy_recv_subject — own posts are filtered by tag.
 ntfy_send_subject: "my-mesh-inbox-CHANGE-ME"
+
+# Fallback channel used for replies before any incoming text has been seen.
+# Once a message arrives, the bridge replies on that message's channel.
+ntfy_default_send_channel: 1
