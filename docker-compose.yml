@@ -8,6 +8,21 @@ services:
       - "8222:8222"
     command: ["-m", "8222"]
 
+  ntfy:
+    image: binwiederhier/ntfy:latest
+    container_name: ntfy
+    restart: unless-stopped
+    command: ["serve"]
+    environment:
+      - TZ=UTC
+      - NTFY_BEHIND_PROXY=false
+      - NTFY_CACHE_FILE=/var/cache/ntfy/cache.db
+      - NTFY_ATTACHMENT_CACHE_DIR=/var/cache/ntfy/attachments
+    volumes:
+      - ./ntfy-data:/var/cache/ntfy
+    ports:
+      - "8089:80"
+
   ws-node:
     build: .
     image: waveshare-usb-lora-node:latest
@@ -30,6 +45,7 @@ services:
     restart: unless-stopped
     depends_on:
       - nats
+      - ntfy
       - ws-node
     volumes:
       - ./config:/config:ro

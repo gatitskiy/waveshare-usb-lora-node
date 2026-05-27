@@ -7,10 +7,16 @@ The node connects to a [NATS server](https://github.com/nats-io/nats-server) to 
 ## Running with Docker
 
 `docker-compose.yml` brings up the full stack on a Linux host: NATS broker,
-`ws-node` with the USB-LoRa dongle passed in, and `ws-ntfy` forwarding
-incoming text messages to ntfy.sh. The bundled `Dockerfile` is a
-multi-stage build that installs `protoc`, generates the Meshtastic Go
-bindings, and compiles both binaries into an Alpine runtime image.
+a self-hosted `ntfy` server on port 8089, `ws-node` with the USB-LoRa
+dongle passed in, and `ws-ntfy` forwarding incoming text messages from
+NATS to ntfy. The bundled `Dockerfile` is a multi-stage build that
+installs `protoc`, generates the Meshtastic Go bindings, and compiles
+both binaries into an Alpine runtime image.
+
+By default `config/ntfy.yaml` points `ws-ntfy` at the local ntfy service
+(`http://ntfy:80` on the Compose network); set `ntfy_url:
+"https://ntfy.sh"` to use the public instance instead. Local messages are
+visible at `http://<host>:8089/<your_topic>`.
 
 > USB serial passthrough only works on Linux hosts. Docker Desktop on
 > macOS/Windows does not pass through USB-serial devices into containers.

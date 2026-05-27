@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/Archie3d/waveshare-usb-lora-client/pkg/meshtastic"
@@ -29,6 +30,7 @@ func showUsageAndExit(exitCode int) {
 type Configuration struct {
 	NatsUrl           string `yaml:"nats_url"`
 	NatsSubjectPrefix string `yaml:"nats_subject_prefix"`
+	NtfyUrl           string `yaml:"ntfy_url"`
 	NtfyRecvSubject   string `yaml:"ntfy_recv_subject"`
 	NtfySendSubject   string `yaml:"ntfy_send_subject"`
 }
@@ -82,6 +84,11 @@ func main() {
 		log.With("err", err).Fatal("Failed to load configuration")
 	}
 
+	if config.NtfyUrl == "" {
+		config.NtfyUrl = "https://ntfy.sh"
+	}
+	config.NtfyUrl = strings.TrimRight(config.NtfyUrl, "/")
+
 	nc, err := nats.Connect(config.NatsUrl)
 	if err != nil {
 		log.With("err", err).Fatal("Failed to connect to NATS server")
@@ -101,7 +108,7 @@ func main() {
 		log.With("from", message.From, "text", message.Text).Info("Forwarding message")
 
 		// Forward the message to ntfy.sh
-		req, err := http.NewRequest("POST", "https://ntfy.sh/"+config.NtfyRecvSubject, bytes.NewBufferString(message.Text))
+		req, err := http.NewRequest("POST", config.NtfyUrl+"/"+config.NtfyRecvSubject, bytes.NewBufferString(message.Text))
 		if err != nil {
 			log.With("err", err).Error("Failed to create request to ntfy.sh")
 			return

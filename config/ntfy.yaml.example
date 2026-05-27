@@ -1,4 +1,6 @@
 nats_url: "nats://nats:4222"
 nats_subject_prefix: "mesh.my_node"
-ntfy_recv_subject: "my-mesh-inbox-CHANGE-ME"   # https://ntfy.sh/<this>
+ntfy_url: "http://ntfy:80"             # local ntfy service in docker-compose.
+                                       # use "https://ntfy.sh" for the public instance.
+ntfy_recv_subject: "my-mesh-inbox-CHANGE-ME"   # http://<host>:8089/<this>
 ntfy_send_subject: "my-mesh-inbox-CHANGE-ME"
