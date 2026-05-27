@@ -26,26 +26,23 @@ Prepare configuration:
 ```bash
 cp config/node.yaml.example   config/node.yaml
 cp config/ntfy.yaml.example   config/ntfy.yaml
-# edit both files — at minimum set node id, names, public_key,
-# nats_subject_prefix, channel keys, ntfy topic
+cp .env.example               .env
+# edit all three — at minimum set node id, names, public_key,
+# nats_subject_prefix, channel keys, ntfy topics, and the serial device
+# path in .env (see /dev/serial/by-id/ for a stable name)
 ```
 
-Keep `nats_url: "nats://nats:4222"` in both — that's the service name on
-the Compose network.
+Keep `nats_url: "nats://nats:4222"` in both YAML configs — that's the
+service name on the Compose network.
 
-Start everything (defaults to `/dev/ttyACM0`):
+`.env` is auto-loaded by docker compose and used to substitute the
+`${WS_NODE_SERIAL}` and `${LOG_LEVEL}` placeholders in
+`docker-compose.yml`.
+
+Start everything:
 
 ```bash
 docker compose up -d --build
-```
-
-If the dongle is on a different port, or if you have several USB-serial
-devices, override the path. The `by-id` symlink is stable across reboots:
-
-```bash
-ls -l /dev/serial/by-id/
-WS_NODE_SERIAL=/dev/serial/by-id/usb-WCH.CN_USB_Single_Serial_XXXXXXXXXX-if00 \
-  docker compose up -d --build
 ```
 
 Logs:

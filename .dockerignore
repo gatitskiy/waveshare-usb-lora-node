@@ -1,8 +1,12 @@
 .git
 .gitignore
 .gitmodules
+.env
+.env.example
 target
 config
+ntfy-data
+ws-ntfy-data
 docker-compose.yml
 Dockerfile
 .dockerignore

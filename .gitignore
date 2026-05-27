@@ -2,4 +2,5 @@
 /config/*.yaml
 /ntfy-data
 /ws-ntfy-data
+/.env
 node.log
