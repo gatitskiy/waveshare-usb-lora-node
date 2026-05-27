@@ -9,9 +9,11 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/Archie3d/waveshare-usb-lora-client/pkg/meshtastic"
+	"github.com/Archie3d/waveshare-usb-lora-client/pkg/types"
 	"github.com/charmbracelet/log"
 	"github.com/nats-io/nats.go"
 	"gopkg.in/yaml.v3"
@@ -50,6 +52,34 @@ func loadConfiguration(configFile string) (*Configuration, error) {
 	}
 
 	return config, nil
+}
+
+type nodeDirectory struct {
+	mu    sync.RWMutex
+	names map[types.NodeId]string
+}
+
+func newNodeDirectory() *nodeDirectory {
+	return &nodeDirectory{names: map[types.NodeId]string{}}
+}
+
+func (d *nodeDirectory) set(id types.NodeId, name string) {
+	if name == "" {
+		return
+	}
+	d.mu.Lock()
+	d.names[id] = name
+	d.mu.Unlock()
+}
+
+func (d *nodeDirectory) titleFor(id types.NodeId) string {
+	d.mu.RLock()
+	name, ok := d.names[id]
+	d.mu.RUnlock()
+	if ok {
+		return fmt.Sprintf("Message from %s", name)
+	}
+	return fmt.Sprintf("Message from node %s", id)
 }
 
 func main() {
@@ -96,8 +126,26 @@ func main() {
 
 	defer nc.Close()
 
+	directory := newNodeDirectory()
+
+	nodeInfoSub, err := nc.Subscribe(config.NatsSubjectPrefix+".in.node_info", func(msg *nats.Msg) {
+		var info meshtastic.NodeInfoApplicationIncomingMessage
+		if err := json.Unmarshal(msg.Data, &info); err != nil {
+			log.With("err", err).Error("Failed to unmarshal node info")
+			return
+		}
+		name := info.LongName
+		if name == "" {
+			name = info.ShortName
+		}
+		directory.set(info.From, name)
+		log.With("from", info.From, "long_name", info.LongName, "short_name", info.ShortName).Debug("Learned node name")
+	})
+	if err != nil {
+		log.With("err", err).Fatal("Failed to subscribe to node_info")
+	}
+
 	sub, err := nc.Subscribe(config.NatsSubjectPrefix+".in.text", func(msg *nats.Msg) {
-		// Unmarshall msg.Data as JSON and extract the "text" field
 		var message meshtastic.TextApplicationIncomingMessage
 		err := json.Unmarshal(msg.Data, &message)
 		if err != nil {
@@ -105,32 +153,38 @@ func main() {
 			return
 		}
 
-		log.With("from", message.From, "text", message.Text).Info("Forwarding message")
+		title := directory.titleFor(message.From)
+		log.With("from", message.From, "title", title, "text", message.Text).Info("Forwarding message")
 
-		// Forward the message to ntfy.sh
 		req, err := http.NewRequest("POST", config.NtfyUrl+"/"+config.NtfyRecvSubject, bytes.NewBufferString(message.Text))
 		if err != nil {
-			log.With("err", err).Error("Failed to create request to ntfy.sh")
+			log.With("err", err).Error("Failed to create request to ntfy")
 			return
 		}
 		req.Header.Set("Content-Type", "text/plain")
-		req.Header.Set("Title", fmt.Sprintf("Message from node %s", message.From))
+		req.Header.Set("Title", title)
 		client := &http.Client{}
 		resp, err := client.Do(req)
 		if err != nil {
-			log.With("err", err).Error("Failed to forward message to ntfy.sh")
+			log.With("err", err).Error("Failed to forward message to ntfy")
 			return
 		}
 		defer resp.Body.Close()
+		if resp.StatusCode >= 400 {
+			log.With("status", resp.Status, "url", req.URL.String()).Error("ntfy rejected the message")
+		}
 	})
+	if err != nil {
+		log.With("err", err).Fatal("Failed to subscribe to text")
+	}
 
 	c := make(chan os.Signal, 2)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 
 	go func() {
 		<-c
-		// Make sure we turn the radio off
 		sub.Unsubscribe()
+		nodeInfoSub.Unsubscribe()
 		os.Exit(0)
 	}()
 
