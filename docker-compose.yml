@@ -24,6 +24,7 @@ services:
        "-l", "${LOG_LEVEL:-info}"]
 
   ws-ntfy:
+    build: .
     image: waveshare-usb-lora-node:latest
     container_name: ws-ntfy
     restart: unless-stopped
